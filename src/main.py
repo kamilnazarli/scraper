@@ -3,9 +3,13 @@ import os
 from pathlib import Path
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlsplit
+
 import time
 from datetime import datetime
+
 import re
+from pydantic import BaseModel, ValidationError, HttpUrl
+import json
 
 def if_exists(path, current_url):
     """
@@ -27,6 +31,18 @@ def if_exists(path, current_url):
 def clean_filename(name):
     return re.sub(r'[<>:"/\\|?*]', '', name)
 
+class Record(BaseModel):
+    title: str
+    product_url: HttpUrl
+    price_text: str
+    availability_text: str
+    rating_text: str
+    description: str | None = None
+    source_page: HttpUrl
+    fetched_at: str
+    price_gbp: float
+
+
 headers = {
     "user-agent": "https://github.com/kamilnazarli/scraper"
 }
@@ -36,11 +52,15 @@ unique_book_urls = []
 raw_records  = []
 pages_visited = 0
 
+valid_records, invalid_records = [], []
+
 page_url = "https://books.toscrape.com/catalogue/"
 current_url = "https://books.toscrape.com/catalogue/page-1.html"
 
-cache_dir = Path("cache")
+Path("output").mkdir(parents=True, exist_ok=True) # Output directory for keeping results
+cache_dir = Path("cache") # Cache directory to keep files locally
 cache_dir.mkdir(parents=True, exist_ok=True)
+
 cache_path = cache_dir / f"catalogue-page-{pages_visited + 1}.html"
 
 
@@ -70,7 +90,6 @@ while pages_visited < 3:
         next_pages = soup.find("li", class_="next")
         next_href = next_pages.select("a")[0]["href"]
 
-
     for book_name, url in each_page.items():
         book_name = clean_filename(book_name)
         book_path = cache_dir / f"{book_name}.html"
@@ -84,6 +103,9 @@ while pages_visited < 3:
 
             title = book_name
             price = pr.css.select("p")[0].string  # price
+            price_clean = re.sub(r"[^\d.]", "", price)
+            price_gbp = float(price_clean) # raw price value
+
             availability = pr.css.select("p")[1].contents[-1].strip() # availability text
 
             # print((pr.css.select("p")[2]["class"])) # returns a list
@@ -102,16 +124,33 @@ while pages_visited < 3:
                 "rating_text": rating,
                 "description": desc,
                 "source_page": source_page,
-                "fetched_at": fetched_at
+                "fetched_at": fetched_at,
+                "price_gbp": price_gbp
             }
             raw_records.append(record)
-            
+
+            # Validating each record before storing
+            try:
+                validated_record = Record(**record)
+                valid_records.append(validated_record.model_dump(mode="json"))
+            except ValidationError as e:
+                invalid_records.append({
+                    "record": record,
+                    "reason": e.errors()})
+
 
     pages_visited += 1 # to keep record of pages
     cache_path = cache_dir / f"catalogue-page-{pages_visited + 1}.html"
     current_url = f"https://books.toscrape.com/catalogue/page-{pages_visited + 1}.html"
 
+# Write the result to JSON file
+with open("output/books.json", "w", encoding="utf-8") as file:
+    json.dump(valid_records, file, indent=4)
+
+with open("output/errors.json", "w", encoding="utf-8") as file:
+    json.dump(invalid_records, file, indent=4)
 
 print(f"Catalogue pages: {pages_visited}")
 print(f"Discovered: {len(absolute_book_urls)}")
 print(f"Unique urls: {len(unique_book_urls)}")
+print(valid_records[0])
