@@ -44,7 +44,7 @@ The scraper incorporates defensive engineering patterns: local disk caching for 
 git clone https://github.com/kamilnazarli/scraper.git
 cd scraper
 
-python -m venv venv
+python -m venv .venv
 # On macOS / Linux:
 source .venv/bin/activate
 # On Windows (PowerShell):
